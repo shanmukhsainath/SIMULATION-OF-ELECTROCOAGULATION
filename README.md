@@ -1,4 +1,4 @@
-# ⚡ Electrocoagulation Water Treatment Simulation
+#  Electrocoagulation Water Treatment Simulation
 
 A realistic web-based visualization of the electrocoagulation water treatment process, featuring real-time particle animations and treatment time predictions.
 
@@ -132,9 +132,9 @@ The simulation uses a heuristic model with the following base assumptions:
 - **Turbidity factor**: Higher contamination requires more time
 - **pH factor**: Deviation from neutral pH increases treatment time
 
-## 🧪 How Predictions Work (Heuristic Model)
+##  How Predictions Work (Heuristic Model)
 
-> ⚠️ **Important**: This simulation uses a **mathematical heuristic model**, NOT real sensor data or machine learning.
+> **Important**: This simulation uses a **mathematical heuristic model**, NOT real sensor data or machine learning.
 
 ### Treatment Time Calculation
 
@@ -185,11 +185,11 @@ The model is inspired by:
 ### What a Real System Would Need
 
 In an **actual implementation**, you would require:
-- 🔬 **Turbidity sensors** - to measure water cloudiness
-- 📈 **pH meters** - to monitor acidity/alkalinity
-- ⚡ **Current/voltage monitors** - to track electrical parameters
-- 🧫 **Water quality analyzers** - for contaminant detection
-- 📊 **Machine learning models** - trained on real experimental data
+- **Turbidity sensors** - to measure water cloudiness
+- **pH meters** - to monitor acidity/alkalinity
+- **Current/voltage monitors** - to track electrical parameters
+- **Water quality analyzers** - for contaminant detection
+- **Machine learning models** - trained on real experimental data
 
 ##  Contributing
 
