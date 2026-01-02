@@ -1,0 +1,13 @@
+{
+  "name": "electrolysis-simulation",
+  "version": "1.0.0",
+  "description": "Electrolysis simulation project",
+  "main": "app.js",
+  "scripts": {
+    "dev": "npx http-server -p 3000 -o -c-1",
+    "start": "npx http-server -p 3000 -c-1"
+  },
+  "keywords": ["simulation", "electrocoagulation"],
+  "author": "",
+  "license": "ISC"
+}

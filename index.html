@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Electrocoagulation Water Treatment System</title>
+    <link rel="stylesheet" href="style.css?v=20260102e">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.1/anime.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <!-- HEADER -->
+        <header class="header-card">
+            <h1>⚡ Electrocoagulation Water Treatment System</h1>
+            <p class="subtitle">Interactive Visualization of Sacrificial Anode Water Purification</p>
+        </header>
+
+        <!-- MAIN GRID: LEFT (Controls) + CENTER (Visualization) + RIGHT (Water Quality) -->
+        <div class="main-grid">
+            
+            <!-- LEFT PANEL - CONTROL PANEL -->
+            <div class="left-panel">
+                <div class="card control-card">
+                    <h2 class="card-title">Control Panel</h2>
+
+                    <!-- Fixed Electrode Configuration Info -->
+                    <div class="form-group">
+                        <div class="electrode-config-info">
+                            <div class="config-item">
+                                <span class="config-label">🔴 Anode:</span>
+                                <span class="config-value">Aluminum (Al)</span>
+                            </div>
+                            <div class="config-item">
+                                <span class="config-label">🔵 Cathode:</span>
+                                <span class="config-value">Iron (Fe)</span>
+                            </div>
+                            <p class="config-tooltip">Aluminum acts as a sacrificial anode, while iron serves as the cathode for hydrogen evolution.</p>
+                        </div>
+                    </div>
+
+                    <!-- Current Slider -->
+                    <div class="form-group">
+                        <div class="slider-header">
+                            <label class="form-label">Current (A)</label>
+                            <span class="slider-value" id="currentValue">2.0 A</span>
+                        </div>
+                        <input type="range" id="currentSlider" class="form-range" 
+                               min="0.5" max="5" step="0.1" value="2.0">
+                    </div>
+
+                    <!-- Water Volume Input -->
+                    <div class="form-group">
+                        <label for="waterVolume" class="form-label">Water Volume (L)</label>
+                        <input type="number" id="waterVolume" class="form-input" 
+                               min="0.5" max="5" step="0.5" value="2">
+                    </div>
+
+                    <!-- Control Buttons -->
+                    <div class="button-group">
+                        <button id="startBtn" class="btn btn-start">▶ Start</button>
+                        <button id="pauseBtn" class="btn btn-pause" disabled>⏸ Pause</button>
+                        <button id="resetBtn" class="btn btn-reset">Reset</button>
+                    </div>
+
+                    <!-- Speed Control -->
+                    <div class="form-group">
+                        <div class="slider-header">
+                            <label class="form-label">Speed</label>
+                            <span class="slider-value" id="speedValue">1x</span>
+                        </div>
+                        <input type="range" id="speedSlider" class="form-range" 
+                               min="0.5" max="2" step="0.1" value="1">
+                    </div>
+                </div>
+            </div>
+
+            <!-- CENTER PANEL - MAIN VISUALIZATION -->
+            <div class="center-panel">
+                <div class="card visualization-card">
+                    <!-- Main SVG Beaker Visualization -->
+                    <svg id="beaker" viewBox="0 0 400 600" class="beaker-svg">
+                        <defs>
+                            <linearGradient id="anodeGradient" x1="0%" y1="0%" x2="100%">
+                                <stop offset="0%" style="stop-color:#ff6b6b;stop-opacity:0.9" />
+                                <stop offset="100%" style="stop-color:#ff3333;stop-opacity:0.9" />
+                            </linearGradient>
+                            <linearGradient id="cathodeGradient" x1="0%" y1="0%" x2="100%">
+                                <stop offset="0%" style="stop-color:#6b9bff;stop-opacity:0.9" />
+                                <stop offset="100%" style="stop-color:#3366ff;stop-opacity:0.9" />
+                            </linearGradient>
+                        </defs>
+
+                        <!-- Beaker Glass Outline -->
+                        <g class="beaker-outline">
+                            <path d="M 80 120 L 60 560 Q 60 580 80 580 L 320 580 Q 340 580 340 560 L 320 120 Z" 
+                                  fill="rgba(100, 200, 255, 0.1)" stroke="rgba(100, 200, 255, 0.5)" stroke-width="2"/>
+                        </g>
+
+                        <!-- Volume Scale Markings -->
+                        <g class="volume-scale">
+                            <line x1="50" y1="160" x2="70" y2="160" stroke="rgba(100, 200, 255, 0.4)" stroke-width="2"/>
+                            <text x="30" y="168" class="scale-label">5L</text>
+                            
+                            <line x1="50" y1="240" x2="70" y2="240" stroke="rgba(100, 200, 255, 0.4)" stroke-width="2"/>
+                            <text x="30" y="248" class="scale-label">4L</text>
+                            
+                            <line x1="50" y1="320" x2="70" y2="320" stroke="rgba(100, 200, 255, 0.4)" stroke-width="2"/>
+                            <text x="30" y="328" class="scale-label">3L</text>
+                            
+                            <line x1="50" y1="400" x2="70" y2="400" stroke="rgba(100, 200, 255, 0.4)" stroke-width="2"/>
+                            <text x="30" y="408" class="scale-label">2L</text>
+                            
+                            <line x1="50" y1="480" x2="70" y2="480" stroke="rgba(100, 200, 255, 0.4)" stroke-width="2"/>
+                            <text x="30" y="488" class="scale-label">1L</text>
+                        </g>
+
+                        <!-- Water Level -->
+                        <g id="waterGroup">
+                            <rect id="waterLevel" x="80" y="400" width="240" height="180" 
+                                  fill="rgba(100, 180, 255, 0.6)" rx="2"/>
+                            
+                            <!-- Sediment Layer -->
+                            <rect id="sedimentLayer" x="80" y="540" width="240" height="40" 
+                                  fill="rgba(150, 100, 80, 0.5)" rx="2"/>
+                        </g>
+
+                        <!-- Electrodes -->
+                        <g id="electrodes">
+                            <!-- Anode: Aluminum (Sacrificial) -->
+                            <g id="anode" class="electrode">
+                                <rect x="120" y="150" width="20" height="420" 
+                                      fill="url(#anodeGradient)" stroke="#ff4444" stroke-width="2"/>
+                                <circle cx="130" cy="140" r="8" fill="#ff4444"/>
+                                <text x="130" y="125" class="electrode-label" text-anchor="middle"></text>
+                                <text x="130" y="148" class="electrode-label-text" text-anchor="middle" font-size="11">Al</text>
+                                <text x="130" y="160" class="electrode-label-text" text-anchor="middle" font-size="10">Anode</text>
+                            </g>
+
+                            <!-- Cathode: Iron (Reduction) -->
+                            <g id="cathode" class="electrode">
+                                <rect x="260" y="150" width="20" height="420" 
+                                      fill="url(#cathodeGradient)" stroke="#4444ff" stroke-width="2"/>
+                                <circle cx="270" cy="140" r="8" fill="#4444ff"/>
+                                <text x="270" y="125" class="electrode-label" text-anchor="middle"></text>
+                                <text x="270" y="148" class="electrode-label-text" text-anchor="middle" font-size="11">Fe</text>
+                                <text x="270" y="160" class="electrode-label-text" text-anchor="middle" font-size="10">Cathode</text>
+                            </g>
+                        </g>
+
+                        <!-- Particles Container -->
+                        <g id="particlesContainer"></g>
+                    </svg>
+                </div>
+            </div>
+
+            <!-- RIGHT PANEL - WATER QUALITY & PREDICTION -->
+            <div class="right-panel">
+                <!-- Treatment Time Prediction Card -->
+                <div class="card prediction-card">
+                    <h2 class="card-title"> Treatment Time Prediction</h2>
+                    <p class="prediction-subtitle" id="predictionSubtitle">Click Start to calculate</p>
+                    
+                    <!-- Calculating Overlay for Time -->
+                    <div id="timeCalculatingOverlay" class="calculating-overlay" style="display: none;">
+                        <div class="calculating-spinner"></div>
+                        <span>Calculating treatment time...</span>
+                    </div>
+
+                    <!-- Time Results Container (hidden initially) -->
+                    <div id="timeResults" style="display: none;">
+                    
+                    <!-- Time Display -->
+                    <div class="time-display">
+                        <div class="countdown" id="countdownDisplay">--</div>
+                        <div class="time-label"> Estimated Total Time</div>
+                    </div>
+
+                    <!-- Progress Bar -->
+                    <div class="progress-container">
+                        <div class="progress-bar-large">
+                            <div id="treatmentProgress" class="progress-fill-large" style="width: 0%; background: linear-gradient(90deg, #ff4757, #ffae57);"></div>
+                        </div>
+                        <div class="progress-text" id="progressText">0%</div>
+                    </div>
+
+                    </div> <!-- End of timeResults -->
+
+                    <!-- Info Box -->
+                    <div class="prediction-info">
+                        <p class="info-note"> Realistic water treatment time based on electrocoagulation physics</p>
+                        <div class="prediction-factors">
+                            <div class="factor-item">
+                                <span class="factor-label">Current Effect:</span>
+                                <span class="factor-value" id="factorCurrent">0.5x</span>
+                            </div>
+                            <div class="factor-item">
+                                <span class="factor-label">Volume Factor:</span>
+                                <span class="factor-value" id="factorVolume">1.0x</span>
+                            </div>
+                            <div class="factor-item">
+                                <span class="factor-label">Anode Type:</span>
+                                <span class="factor-value" id="factorAnode">Aluminum</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card quality-card">
+                    <h2 class="card-title"> Predicted Water Quality</h2>
+                    <p class="quality-subtitle" id="qualitySubtitle">Click Start to analyze water sample</p>
+
+                    <!-- Calculating Overlay -->
+                    <div id="calculatingOverlay" class="calculating-overlay" style="display: none;">
+                        <div class="calculating-spinner"></div>
+                        <span>Analyzing water sample...</span>
+                    </div>
+
+                    <!-- Results Container (hidden initially) -->
+                    <div id="qualityResults" class="quality-results" style="display: none;">
+
+                    <!-- Turbidity Metric -->
+                    <div class="metric">
+                        <div class="metric-header">
+                            <span class="metric-label">Turbidity</span>
+                            <span class="metric-value" id="turbidityValue">--</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div id="turbidityBar" class="progress-fill" style="width: 0%; background: linear-gradient(90deg, #ff6b6b, #ff8c00);"></div>
+                        </div>
+                    </div>
+
+                    <!-- Water Clarity Metric -->
+                    <div class="metric">
+                        <div class="metric-header">
+                            <span class="metric-label">Water Clarity</span>
+                            <span class="metric-value" id="clarityValue">--</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div id="clarityBar" class="progress-fill" style="width: 0%; background: linear-gradient(90deg, #4facfe, #00f2fe);"></div>
+                        </div>
+                    </div>
+
+                    <!-- pH Level Metric -->
+                    <div class="metric">
+                        <div class="metric-header">
+                            <span class="metric-label">pH Level</span>
+                            <span class="metric-value" id="phValue">--</span>
+                        </div>
+                        <div class="ph-gradient">
+                            <div class="ph-marker" id="phMarker" style="left: 50%;"></div>
+                            <span class="ph-label ph-label-start">Acidic</span>
+                            <span class="ph-label ph-label-end">Alkaline</span>
+                        </div>
+                    </div>
+
+                    </div> <!-- End of qualityResults -->
+                </div>
+
+                <!-- Process Info Panel -->
+                <div class="card process-info-card">
+                    <h2 class="card-title"> Process Info</h2>
+
+                    <!-- At Anode -->
+                    <div class="info-item">
+                        <div class="info-title"> At Anode (Oxidation)</div>
+                        <div class="info-equation" data-anode-info>Al → Al³⁺ + 3e⁻</div>
+                        <div class="info-description">Metal ions released</div>
+                    </div>
+
+                    <!-- At Cathode -->
+                    <div class="info-item">
+                        <div class="info-title"> At Cathode (Reduction)</div>
+                        <div class="info-equation">2H₂O + 2e⁻ → H₂ + 2OH⁻</div>
+                        <div class="info-description">Hydrogen gas formation</div>
+                    </div>
+
+                    <!-- In Solution -->
+                    <div class="info-item">
+                        <div class="info-title"> In Solution</div>
+                        <div class="info-description">Metal hydroxide flocs form, trap impurities, and settle</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js?v=20260102e"></script>
+</body>
+</html>
