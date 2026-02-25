@@ -17,10 +17,28 @@ const state = {
   phLevel: 7.0,
   anodeThickness: 1.0,
   
+  // Water Quality Input Parameters
+  initialPH: 7.0,           // pH units (4-10)
+  initialTurbidity: 100,     // NTU (10-500)
+  initialTSS: 150,           // mg/L Total Suspended Solids (10-1000)
+  conductivity: 500,         // µS/cm Electrical Conductivity (100-2000)
+  initialO2: 6.0,            // mg/L Dissolved Oxygen (0-14)
+  
+  // Electrode Parameters (for kinetic model)
+  electrodeArea: 50,        // cm² (total active surface area of anode)
+  electrodeHeight: 10,      // cm (submerged height)
+  electrodeWidth: 5,        // cm (electrode width)
+  
   // Treatment time prediction
   estimatedTreatmentTime: 0,
   elapsedTreatmentTime: 0,
   isTreated: false,
+  
+  // Kinetic model outputs
+  chargeLoading: 0,         // C/L (Coulombs per liter)
+  currentDensity: 0,        // A/m² (current density)
+  aluminumDosage: 0,        // mg/L Al³⁺ released
+  targetChargeLoading: 0,   // C/L required for treatment
   
   particles: {
     ions: [],
@@ -28,6 +46,44 @@ const state = {
     bubbles: [],
     impurities: []
   }
+};
+
+// ========================================
+// KINETIC MODEL CONSTANTS (FROM LITERATURE)
+// ========================================
+const KINETIC_CONSTANTS = {
+  // Faraday constant (C/mol)
+  F: 96485,
+  
+  // Aluminum properties
+  Al_MOLAR_MASS: 26.98,     // g/mol
+  Al_VALENCE: 3,            // electrons transferred
+  
+  // First-order rate constants (L/C) - from EC literature
+  // These are typical values from Hakizimana et al. (2017) and Emamjomeh & Sivakumar (2009)
+  k_turbidity: 0.008,       // L/C - turbidity removal rate constant
+  k_TSS: 0.006,             // L/C - TSS removal rate constant
+  k_COD: 0.004,             // L/C - COD removal (if applicable)
+  
+  // pH model constants (from Kobya et al. 2003)
+  pH_optimal: 7.0,          // Optimal pH for Al coagulation
+  pH_shift_rate: 0.001,     // pH shift per C/L towards neutral
+  
+  // Oxygen model constants
+  O2_increase_rate: 0.0005, // mg/L per C/L (from H2 bubble aeration)
+  O2_saturation: 9.1,       // mg/L at 20°C
+  
+  // Conductivity model
+  conductivity_loss_rate: 0.00005, // fractional loss per C/L
+  
+  // Treatment thresholds (target removal efficiency)
+  target_turbidity_removal: 0.95,   // 95% removal
+  target_TSS_removal: 0.93,         // 93% removal
+  
+  // Current density range (A/m²) - optimal range from literature
+  j_min: 5,                 // Minimum effective current density
+  j_max: 50,                // Maximum before side reactions dominate
+  j_optimal: 20             // Optimal current density
 };
 
 // Initialize impurities
@@ -46,53 +102,128 @@ function initializeImpurities() {
 }
 
 // ========================================
-// TREATMENT TIME PREDICTION (HEURISTIC MODEL)
+// KINETIC MODEL - TREATMENT TIME CALCULATION
+// Based on First-Order Kinetics and Charge Loading
 // ========================================
 
+// Calculate current density (A/m²)
+function calculateCurrentDensity() {
+  // Electrode area in m² (convert from cm²)
+  const areaM2 = state.electrodeArea / 10000;
+  state.currentDensity = state.current / areaM2;
+  return state.currentDensity;
+}
+
+// Calculate charge loading at time t (C/L)
+function calculateChargeLoading(timeSeconds) {
+  // Q = I × t / V (Coulombs per Liter)
+  return (state.current * timeSeconds) / state.waterVolume;
+}
+
+// Calculate aluminum dosage using Faraday's Law (mg/L)
+function calculateAluminumDosage(timeSeconds) {
+  // m = (I × t × M) / (z × F) in grams
+  const massGrams = (state.current * timeSeconds * KINETIC_CONSTANTS.Al_MOLAR_MASS) / 
+                    (KINETIC_CONSTANTS.Al_VALENCE * KINETIC_CONSTANTS.F);
+  // Convert to mg/L
+  return (massGrams * 1000) / state.waterVolume;
+}
+
+// Calculate required charge loading for target removal (C/L)
+function calculateTargetChargeLoading() {
+  // Using first-order kinetics: C/C₀ = e^(-k×Q)
+  // Solving for Q: Q = -ln(1 - removal) / k
+  
+  // Calculate Q needed for turbidity removal
+  const Q_turbidity = -Math.log(1 - KINETIC_CONSTANTS.target_turbidity_removal) / 
+                      KINETIC_CONSTANTS.k_turbidity;
+  
+  // Calculate Q needed for TSS removal
+  const Q_TSS = -Math.log(1 - KINETIC_CONSTANTS.target_TSS_removal) / 
+                KINETIC_CONSTANTS.k_TSS;
+  
+  // Use the larger value (limiting factor)
+  return Math.max(Q_turbidity, Q_TSS);
+}
+
+// Calculate pollutant concentration at given charge loading
+function calculateConcentrationAtQ(initialConc, rateConstant, chargeLoading) {
+  // First-order kinetics: C(Q) = C₀ × e^(-k×Q)
+  return initialConc * Math.exp(-rateConstant * chargeLoading);
+}
+
+// pH adjustment factor (affects rate constants)
+function calculatePHEfficiencyFactor() {
+  // Optimal pH is 6.5-7.5 for Al coagulation
+  // Efficiency decreases as pH deviates from optimal
+  const deviation = Math.abs(state.initialPH - KINETIC_CONSTANTS.pH_optimal);
+  // Efficiency drops by ~10% for each pH unit away from optimal
+  return Math.max(0.5, 1 - (deviation * 0.1));
+}
+
+// Conductivity efficiency factor
+function calculateConductivityEfficiencyFactor() {
+  // Higher conductivity = better current efficiency
+  // Normalized to 500 µS/cm as baseline (efficiency = 1.0)
+  // Low conductivity (<200) significantly reduces efficiency
+  if (state.conductivity < 200) {
+    return 0.6 + (state.conductivity / 500);
+  }
+  return Math.min(1.2, 0.8 + (state.conductivity / 2500));
+}
+
 function calculateTreatmentTime() {
-  // Heuristic electrocoagulation model with Fixed Al Anode + Fe Cathode
-  // Based on: current, volume, initial turbidity, pH
+  // ========================================
+  // KINETIC MODEL CALCULATION
+  // ========================================
   
-  // Base time (hours) for 2L at 2A with Aluminum anode at high turbidity
-  // Realistic electrocoagulation typically takes 4-24 hours depending on conditions
-  const baseTime = 8 * 3600; // 8 hours baseline in seconds
+  // Step 1: Calculate current density
+  const currentDensity = calculateCurrentDensity();
   
-  // FACTOR 1: Current Effect (inverse relationship - higher current = faster)
-  // Normalized to 2A baseline
-  const currentFactor = 2.0 / state.current;
+  // Step 2: Calculate target charge loading for treatment completion
+  const baseTargetQ = calculateTargetChargeLoading();
   
-  // FACTOR 2: Volume Effect (linear relationship)
-  // Normalized to 2L baseline
-  const volumeFactor = state.waterVolume / 2.0;
+  // Step 3: Apply efficiency factors based on water quality
+  const phEfficiency = calculatePHEfficiencyFactor();
+  const conductivityEfficiency = calculateConductivityEfficiencyFactor();
   
-  // FACTOR 3: Aluminum Anode Fixed (optimal for floc generation)
-  // Aluminum is highly efficient for coagulation
-  const anodeFactor = 1.0; // Aluminum is standard (no variation)
+  // Adjust rate constants based on initial pollutant load
+  // Higher initial turbidity requires more Al dosage per unit removal
+  const turbidityLoadFactor = 1 + Math.log10(state.initialTurbidity / 50);
+  const tssLoadFactor = 1 + Math.log10(state.initialTSS / 100);
+  const loadFactor = Math.max(turbidityLoadFactor, tssLoadFactor);
   
-  // FACTOR 4: Turbidity/Contamination (higher turbidity = longer treatment)
-  // Normalized to 95% initial turbidity
-  const turbidityFactor = (state.turbidity / 95) * 0.8 + 0.2; // Range: 0.2 to 1.0
+  // Effective target charge loading
+  state.targetChargeLoading = baseTargetQ * loadFactor / (phEfficiency * conductivityEfficiency);
   
-  // FACTOR 5: pH Distance from neutral (affects coagulation)
-  // Neutral pH (7.0) is optimal; further away = longer treatment
-  const phDev = Math.abs(state.phLevel - 7.0);
-  const phFactor = 1.0 + (phDev * 0.08);
+  // Step 4: Calculate treatment time from charge loading
+  // Q = I × t / V => t = Q × V / I
+  const treatmentTimeSeconds = (state.targetChargeLoading * state.waterVolume) / state.current;
   
-  // Calculated treatment time in seconds
-  const calculatedTime = baseTime * currentFactor * volumeFactor * anodeFactor * turbidityFactor * phFactor;
+  // Step 5: Calculate expected aluminum dosage at treatment completion
+  state.aluminumDosage = calculateAluminumDosage(treatmentTimeSeconds);
+  
+  // Store kinetic model outputs for display
+  state.currentDensity = currentDensity;
+  state.chargeLoading = 0; // Will be updated during simulation
   
   // Store factors for UI display
   state.treatmentTimeFactors = {
-    current: currentFactor.toFixed(2),
-    volume: volumeFactor.toFixed(2),
-    anode: anodeFactor.toFixed(2),
-    turbidity: turbidityFactor.toFixed(2),
-    ph: phFactor.toFixed(2)
+    currentDensity: currentDensity.toFixed(1) + ' A/m²',
+    targetChargeLoading: state.targetChargeLoading.toFixed(1) + ' C/L',
+    phEfficiency: (phEfficiency * 100).toFixed(0) + '%',
+    conductivityEfficiency: (conductivityEfficiency * 100).toFixed(0) + '%',
+    aluminumDosage: state.aluminumDosage.toFixed(1) + ' mg/L'
   };
   
-  state.estimatedTreatmentTime = Math.max(3600, calculatedTime); // Minimum 1 hour
+  state.estimatedTreatmentTime = Math.max(300, treatmentTimeSeconds); // Minimum 5 minutes
   state.elapsedTreatmentTime = 0;
   state.isTreated = false;
+  
+  // Sync initial values with simulation state
+  state.turbidity = Math.min(95, state.initialTurbidity / 5); // Scale NTU to % for visualization
+  state.phLevel = state.initialPH;
+  state.clarity = 100 - state.turbidity;
   
   updatePredictionDisplay();
   updateFactorsDisplay();
@@ -134,9 +265,14 @@ function updatePredictionDisplay() {
 }
 
 function updateFactorsDisplay() {
-  document.getElementById('factorCurrent').textContent = (2.0 / state.current).toFixed(2) + 'x';
-  document.getElementById('factorVolume').textContent = (state.waterVolume / 2.0).toFixed(2) + 'x';
-  document.getElementById('factorAnode').textContent = 'Aluminum (Sacrificial)';
+  // Kinetic model factors display
+  if (state.treatmentTimeFactors) {
+    document.getElementById('factorCurrentDensity').textContent = state.treatmentTimeFactors.currentDensity;
+    document.getElementById('factorChargeLoading').textContent = state.treatmentTimeFactors.targetChargeLoading;
+    document.getElementById('factorAlDosage').textContent = state.treatmentTimeFactors.aluminumDosage;
+    document.getElementById('factorPHEfficiency').textContent = state.treatmentTimeFactors.phEfficiency;
+    document.getElementById('factorConductivityEfficiency').textContent = state.treatmentTimeFactors.conductivityEfficiency;
+  }
 }
 
 // ========================================
@@ -377,35 +513,63 @@ function drawParticlesSVG() {
 }
 
 // ========================================
-// WATER QUALITY UPDATES
+// WATER QUALITY UPDATES (KINETIC MODEL)
 // ========================================
 
 function updateWaterQuality() {
   if (!state.running) return;
 
-  const treatmentRate = state.current * 0.4 * state.speed;
-
-  // Turbidity decreases
-  if (state.turbidity > 5) {
-    state.turbidity = Math.max(5, state.turbidity - treatmentRate * 0.08);
+  // Calculate real elapsed time increment (simulation seconds per real second)
+  // At speed 1.0, each real second = 60 simulation seconds (1 minute)
+  const simulationSecondsPerTick = 60 * state.speed;
+  
+  // Track elapsed treatment time (in simulation seconds)
+  state.elapsedTreatmentTime += simulationSecondsPerTick / 60; // Adjusting for ~60 FPS
+  
+  // ========================================
+  // KINETIC MODEL: Calculate current charge loading
+  // ========================================
+  const Q = calculateChargeLoading(state.elapsedTreatmentTime);
+  state.chargeLoading = Q;
+  
+  // ========================================
+  // FIRST-ORDER KINETICS: C(Q) = C₀ × e^(-k×Q)
+  // ========================================
+  
+  // Turbidity removal
+  const turbidityNTU = calculateConcentrationAtQ(
+    state.initialTurbidity, 
+    KINETIC_CONSTANTS.k_turbidity, 
+    Q
+  );
+  state.turbidity = Math.max(5, Math.min(95, turbidityNTU / 5));
+  
+  // Clarity is inverse of turbidity
+  state.clarity = Math.min(95, 100 - state.turbidity);
+  
+  // TSS removal
+  const currentTSS = calculateConcentrationAtQ(
+    state.initialTSS, 
+    KINETIC_CONSTANTS.k_TSS, 
+    Q
+  );
+  
+  // pH model: shifts towards optimal based on Al(OH)3 formation
+  const phShift = KINETIC_CONSTANTS.pH_shift_rate * Q;
+  if (state.initialPH > KINETIC_CONSTANTS.pH_optimal) {
+    state.phLevel = Math.max(KINETIC_CONSTANTS.pH_optimal, state.initialPH - phShift);
+  } else {
+    state.phLevel = Math.min(KINETIC_CONSTANTS.pH_optimal, state.initialPH + phShift);
   }
 
-  // Clarity increases
-  if (state.clarity < 95) {
-    state.clarity = Math.min(95, state.clarity + treatmentRate * 0.08);
-  }
-
-  // pH adjusts for Aluminum anode (FIXED: Always Al)
-  // Aluminum oxidation lowers pH
-  if (state.phLevel > 6.5) state.phLevel -= 0.003 * state.speed;
-
-  // Anode dissolves (Aluminum anode erosion)
-  if (state.anodeThickness > 0.2) {
-    state.anodeThickness -= 0.00015 * state.current * state.speed;
-  }
-
-  // Track elapsed treatment time (in seconds)
-  state.elapsedTreatmentTime += (treatmentRate / 10) * state.speed;
+  // Anode dissolves using Faraday's Law
+  // Calculate mass loss in grams
+  const massLossGrams = (state.current * state.elapsedTreatmentTime * KINETIC_CONSTANTS.Al_MOLAR_MASS) / 
+                        (KINETIC_CONSTANTS.Al_VALENCE * KINETIC_CONSTANTS.F);
+  // Approximate thickness loss (assuming electrode density ~2.7 g/cm³)
+  const volumeLossCm3 = massLossGrams / 2.7;
+  const thicknessLoss = volumeLossCm3 / state.electrodeArea;
+  state.anodeThickness = Math.max(0.2, 1.0 - thicknessLoss * 100); // Scaled for visualization
   
   // Trigger quality update animation every 500ms
   if (Math.floor(state.elapsedTreatmentTime * 10) % 5 === 0) {
@@ -436,6 +600,123 @@ function setupEventListeners() {
     state.waterVolume = Math.max(0.5, Math.min(5, parseFloat(e.target.value) || 2));
     updateBeakerVisualization();
     calculateTreatmentTime();
+  });
+
+  // Electrode Area Event Listener
+  document.getElementById('electrodeAreaSlider').addEventListener('input', (e) => {
+    state.electrodeArea = parseFloat(e.target.value);
+    document.getElementById('electrodeAreaValue').textContent = state.electrodeArea + ' cm²';
+    calculateTreatmentTime();
+  });
+
+  // Water Quality Parameter Event Listeners
+  document.getElementById('phSlider').addEventListener('input', (e) => {
+    state.initialPH = parseFloat(e.target.value);
+    document.getElementById('phInputValue').textContent = state.initialPH.toFixed(1);
+    calculateTreatmentTime();
+  });
+
+  document.getElementById('turbiditySlider').addEventListener('input', (e) => {
+    state.initialTurbidity = parseFloat(e.target.value);
+    document.getElementById('turbidityInputValue').textContent = state.initialTurbidity + ' NTU';
+    calculateTreatmentTime();
+  });
+
+  document.getElementById('tssSlider').addEventListener('input', (e) => {
+    state.initialTSS = parseFloat(e.target.value);
+    document.getElementById('tssInputValue').textContent = state.initialTSS + ' mg/L';
+    calculateTreatmentTime();
+  });
+
+  document.getElementById('conductivitySlider').addEventListener('input', (e) => {
+    state.conductivity = parseFloat(e.target.value);
+    document.getElementById('conductivityInputValue').textContent = state.conductivity + ' µS/cm';
+    calculateTreatmentTime();
+  });
+
+  document.getElementById('o2Slider').addEventListener('input', (e) => {
+    state.initialO2 = parseFloat(e.target.value);
+    document.getElementById('o2InputValue').textContent = state.initialO2.toFixed(1) + ' mg/L';
+    calculateTreatmentTime();
+  });
+
+  // Check Time Button Handler - Using Kinetic Model
+  document.getElementById('checkTimeBtn').addEventListener('click', () => {
+    const timeValue = parseFloat(document.getElementById('checkTimeValue').value) || 60;
+    const timeUnit = document.getElementById('checkTimeUnit').value;
+    
+    // Convert to seconds
+    let checkTimeSeconds = timeUnit === 'hours' ? timeValue * 3600 : timeValue * 60;
+    
+    // ========================================
+    // KINETIC MODEL CALCULATIONS
+    // ========================================
+    
+    // Calculate charge loading at the given time (C/L)
+    const Q = calculateChargeLoading(checkTimeSeconds);
+    
+    // Calculate progress percentage based on charge loading
+    const progressPercent = Math.min(100, (Q / state.targetChargeLoading) * 100);
+    
+    // Calculate aluminum dosage at this time (mg/L)
+    const alDosage = calculateAluminumDosage(checkTimeSeconds);
+    
+    // ========================================
+    // FIRST-ORDER KINETICS: C(Q) = C₀ × e^(-k×Q)
+    // ========================================
+    
+    // Turbidity removal (first-order kinetics)
+    const turbidityNTU = calculateConcentrationAtQ(
+      state.initialTurbidity, 
+      KINETIC_CONSTANTS.k_turbidity, 
+      Q
+    );
+    // Convert NTU to % for display (scaled)
+    const predictedTurbidity = Math.max(5, Math.min(95, turbidityNTU / 5));
+    
+    // TSS removal (first-order kinetics)
+    const predictedTSS = Math.max(10, calculateConcentrationAtQ(
+      state.initialTSS, 
+      KINETIC_CONSTANTS.k_TSS, 
+      Q
+    ));
+    
+    // Clarity is inverse of turbidity
+    const predictedClarity = Math.min(95, 100 - predictedTurbidity);
+    
+    // pH model: shifts towards optimal based on Al(OH)3 formation
+    // pH shift depends on initial pH and charge loading
+    const phShift = KINETIC_CONSTANTS.pH_shift_rate * Q;
+    let predictedPH = state.initialPH;
+    if (state.initialPH > KINETIC_CONSTANTS.pH_optimal) {
+      predictedPH = Math.max(KINETIC_CONSTANTS.pH_optimal, state.initialPH - phShift);
+    } else {
+      predictedPH = Math.min(KINETIC_CONSTANTS.pH_optimal, state.initialPH + phShift);
+    }
+    
+    // Conductivity decreases due to ion consumption
+    const conductivityLoss = state.conductivity * KINETIC_CONSTANTS.conductivity_loss_rate * Q;
+    const predictedConductivity = Math.max(state.conductivity * 0.7, state.conductivity - conductivityLoss);
+    
+    // Dissolved O2 increases due to H2 bubble aeration
+    const o2Increase = KINETIC_CONSTANTS.O2_increase_rate * Q;
+    const predictedO2 = Math.min(KINETIC_CONSTANTS.O2_saturation, state.initialO2 + o2Increase);
+    
+    // Display results
+    const timeDisplay = timeUnit === 'hours' 
+      ? `${timeValue}h` 
+      : `${timeValue}m`;
+    
+    document.getElementById('checkedTimeDisplay').textContent = timeDisplay;
+    document.getElementById('checkTurbidity').textContent = predictedTurbidity.toFixed(1) + '%';
+    document.getElementById('checkClarity').textContent = predictedClarity.toFixed(1) + '%';
+    document.getElementById('checkPH').textContent = predictedPH.toFixed(2);
+    document.getElementById('checkTSS').textContent = Math.round(predictedTSS) + ' mg/L';
+    document.getElementById('checkConductivity').textContent = Math.round(predictedConductivity) + ' µS/cm';
+    document.getElementById('checkO2').textContent = predictedO2.toFixed(1) + ' mg/L';
+    document.getElementById('checkProgressPercent').textContent = progressPercent.toFixed(1) + '%';
+    
+    document.getElementById('timeCheckResults').style.display = 'block';
   });
 
   document.getElementById('speedSlider').addEventListener('input', (e) => {
@@ -483,9 +764,9 @@ function setupEventListeners() {
   document.getElementById('resetBtn').addEventListener('click', () => {
     state.running = false;
     state.time = 0;
-    state.turbidity = 95;
-    state.clarity = 5;
-    state.phLevel = 7.0;
+    state.turbidity = Math.min(95, state.initialTurbidity / 5);
+    state.clarity = 100 - state.turbidity;
+    state.phLevel = state.initialPH;
     state.anodeThickness = 1.0;
     state.elapsedTreatmentTime = 0;
     state.isTreated = false;
@@ -511,8 +792,17 @@ function setupEventListeners() {
     document.getElementById('turbidityValue').textContent = '--';
     document.getElementById('clarityValue').textContent = '--';
     document.getElementById('phValue').textContent = '--';
+    document.getElementById('tssValue').textContent = '--';
+    document.getElementById('conductivityValue').textContent = '--';
+    document.getElementById('o2Value').textContent = '--';
     document.getElementById('turbidityBar').style.width = '0%';
     document.getElementById('clarityBar').style.width = '0%';
+    document.getElementById('tssBar').style.width = '0%';
+    document.getElementById('conductivityBar').style.width = '0%';
+    document.getElementById('o2Bar').style.width = '0%';
+    
+    // Reset time check results
+    document.getElementById('timeCheckResults').style.display = 'none';
 
     document.getElementById('startBtn').disabled = false;
     document.getElementById('pauseBtn').disabled = true;
@@ -564,6 +854,9 @@ function showPredictedResults() {
   const predictedTurbidity = 5;
   const predictedClarity = 95;
   const predictedPH = 6.8;
+  const predictedTSS = 10; // Target TSS after treatment (mg/L)
+  const predictedConductivity = state.conductivity * 0.85; // Slight reduction after treatment
+  const predictedO2 = Math.min(12, state.initialO2 * 1.4); // O2 increases due to aeration
   
   // Animate turbidity
   animateValue('turbidityValue', 0, predictedTurbidity, '%', 800);
@@ -577,6 +870,21 @@ function showPredictedResults() {
   animatePHValue('phValue', 7.0, predictedPH, 600);
   const phPercent = (predictedPH / 14) * 100;
   document.getElementById('phMarker').style.left = phPercent + '%';
+  
+  // Animate TSS (from initial to target low value)
+  animateValue('tssValue', state.initialTSS, predictedTSS, ' mg/L', 1200);
+  const tssPercent = (predictedTSS / 1000) * 100; // Scale to max 1000 mg/L
+  animateProgressBar('tssBar', tssPercent, 1200);
+  
+  // Animate Conductivity
+  animateValue('conductivityValue', state.conductivity, Math.round(predictedConductivity), ' µS/cm', 1400);
+  const conductivityPercent = (predictedConductivity / 2000) * 100; // Scale to max 2000 µS/cm
+  animateProgressBar('conductivityBar', conductivityPercent, 1400);
+  
+  // Animate Dissolved O2
+  animateValueDecimal('o2Value', state.initialO2, predictedO2, ' mg/L', 1600);
+  const o2Percent = (predictedO2 / 14) * 100; // Scale to max 14 mg/L
+  animateProgressBar('o2Bar', o2Percent, 1600);
 }
 
 function animateValue(elementId, start, end, suffix, duration) {
@@ -624,6 +932,24 @@ function animatePHValue(elementId, start, end, duration) {
     const eased = 1 - Math.pow(1 - progress, 3);
     const current = start + (end - start) * eased;
     element.textContent = current.toFixed(2);
+    
+    if (progress < 1) {
+      requestAnimationFrame(update);
+    }
+  }
+  requestAnimationFrame(update);
+}
+
+function animateValueDecimal(elementId, start, end, suffix, duration) {
+  const element = document.getElementById(elementId);
+  const startTime = performance.now();
+  
+  function update(currentTime) {
+    const elapsed = currentTime - startTime;
+    const progress = Math.min(elapsed / duration, 1);
+    const eased = 1 - Math.pow(1 - progress, 3); // easeOutCubic
+    const current = start + (end - start) * eased;
+    element.textContent = current.toFixed(1) + suffix;
     
     if (progress < 1) {
       requestAnimationFrame(update);

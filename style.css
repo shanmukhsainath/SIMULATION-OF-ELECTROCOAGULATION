@@ -223,6 +223,43 @@ h1 {
 .form-group:nth-child(4) { animation-delay: 0.25s; }
 .form-group:nth-child(5) { animation-delay: 0.3s; }
 
+/* Water Quality Parameters Section */
+.water-quality-inputs {
+    margin-top: 10px;
+}
+
+.water-quality-inputs .form-group {
+    margin-bottom: 16px;
+}
+
+.section-divider {
+    display: flex;
+    align-items: center;
+    margin-bottom: 18px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(0, 212, 255, 0.3);
+}
+
+.section-label {
+    color: var(--primary-cyan);
+    font-size: 0.9em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    background: linear-gradient(90deg, var(--primary-cyan), var(--primary-green));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.input-hint {
+    font-size: 0.75em;
+    color: rgba(160, 160, 160, 0.8);
+    margin-top: 6px;
+    font-style: italic;
+    padding-left: 2px;
+}
+
 /* Electrode Configuration Info Box */
 .electrode-config-info {
     background: linear-gradient(135deg, rgba(0, 30, 60, 0.9), rgba(30, 10, 50, 0.9));
@@ -770,6 +807,124 @@ h1 {
     font-size: 0.9em;
     margin: -8px 0 16px 0;
     font-style: italic;
+}
+
+/* ==========================================
+   TIME CHECK SECTION
+   ========================================== */
+
+.time-check-section {
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid rgba(0, 212, 255, 0.2);
+}
+
+.time-check-section .section-divider {
+    margin-bottom: 14px;
+}
+
+.time-check-inputs {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+}
+
+.time-input-group {
+    display: flex;
+    gap: 8px;
+    flex: 1;
+    min-width: 180px;
+}
+
+.time-input {
+    width: 80px !important;
+    padding: 10px 12px !important;
+    text-align: center;
+    font-weight: 600;
+}
+
+.time-unit-select {
+    flex: 1;
+    padding: 10px 12px !important;
+    min-width: 90px;
+}
+
+.btn-check-time {
+    background: linear-gradient(135deg, #a55eea, #8854d0);
+    color: white;
+    padding: 10px 16px;
+    border: none;
+    border-radius: 10px;
+    font-weight: 600;
+    font-size: 0.85em;
+    cursor: pointer;
+    transition: var(--transition);
+    white-space: nowrap;
+    box-shadow: 0 4px 15px rgba(165, 94, 234, 0.3);
+}
+
+.btn-check-time:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(165, 94, 234, 0.5);
+}
+
+.time-check-results {
+    background: rgba(165, 94, 234, 0.1);
+    border: 1px solid rgba(165, 94, 234, 0.3);
+    border-radius: 12px;
+    padding: 14px;
+    animation: fadeIn 0.3s ease-out;
+}
+
+.time-check-header {
+    color: var(--primary-cyan);
+    font-size: 0.9em;
+    font-weight: 600;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(165, 94, 234, 0.2);
+}
+
+.time-check-values {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+}
+
+.check-value-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 10px;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 6px;
+    font-size: 0.82em;
+}
+
+.check-label {
+    color: rgba(160, 160, 160, 0.9);
+    font-weight: 500;
+}
+
+.check-value {
+    color: var(--primary-green);
+    font-weight: 700;
+    font-family: 'Courier New', monospace;
+}
+
+.progress-indicator {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(165, 94, 234, 0.2);
+    text-align: center;
+    font-size: 0.85em;
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.progress-indicator span {
+    color: var(--primary-cyan);
+    font-weight: 700;
 }
 
 /* ==========================================

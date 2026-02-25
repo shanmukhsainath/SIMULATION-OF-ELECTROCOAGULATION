@@ -55,6 +55,86 @@
                                min="0.5" max="5" step="0.5" value="2">
                     </div>
 
+                    <!-- Electrode Parameters Section -->
+                    <div class="form-group electrode-params">
+                        <div class="section-divider">
+                            <span class="section-label">Electrode Parameters</span>
+                        </div>
+
+                        <!-- Electrode Area Input -->
+                        <div class="form-group">
+                            <div class="slider-header">
+                                <label class="form-label">Electrode Area (cm²)</label>
+                                <span class="slider-value" id="electrodeAreaValue">50 cm²</span>
+                            </div>
+                            <input type="range" id="electrodeAreaSlider" class="form-range" 
+                                   min="10" max="200" step="5" value="50">
+                            <div class="input-hint">Active anode surface area</div>
+                        </div>
+                    </div>
+
+                    <!-- Water Quality Parameters Section -->
+                    <div class="form-group water-quality-inputs">
+                        <div class="section-divider">
+                            <span class="section-label">Water Quality Parameters</span>
+                        </div>
+
+                        <!-- pH Input -->
+                        <div class="form-group">
+                            <div class="slider-header">
+                                <label class="form-label">pH (pH units)</label>
+                                <span class="slider-value" id="phInputValue">7.0</span>
+                            </div>
+                            <input type="range" id="phSlider" class="form-range" 
+                                   min="4" max="10" step="0.1" value="7.0">
+                            <div class="input-hint">Initial acidity/alkalinity</div>
+                        </div>
+
+                        <!-- Turbidity Input -->
+                        <div class="form-group">
+                            <div class="slider-header">
+                                <label class="form-label">Turbidity (NTU)</label>
+                                <span class="slider-value" id="turbidityInputValue">100 NTU</span>
+                            </div>
+                            <input type="range" id="turbiditySlider" class="form-range" 
+                                   min="10" max="500" step="10" value="100">
+                            <div class="input-hint">Suspended particles indicator</div>
+                        </div>
+
+                        <!-- TSS Input -->
+                        <div class="form-group">
+                            <div class="slider-header">
+                                <label class="form-label">TSS (mg/L)</label>
+                                <span class="slider-value" id="tssInputValue">150 mg/L</span>
+                            </div>
+                            <input type="range" id="tssSlider" class="form-range" 
+                                   min="10" max="1000" step="10" value="150">
+                            <div class="input-hint">Total Suspended Solids</div>
+                        </div>
+
+                        <!-- Electrical Conductivity Input -->
+                        <div class="form-group">
+                            <div class="slider-header">
+                                <label class="form-label">Conductivity (µS/cm)</label>
+                                <span class="slider-value" id="conductivityInputValue">500 µS/cm</span>
+                            </div>
+                            <input type="range" id="conductivitySlider" class="form-range" 
+                                   min="100" max="2000" step="50" value="500">
+                            <div class="input-hint">Electrical conductivity</div>
+                        </div>
+
+                        <!-- Dissolved Oxygen Input -->
+                        <div class="form-group">
+                            <div class="slider-header">
+                                <label class="form-label">Dissolved O₂ (mg/L)</label>
+                                <span class="slider-value" id="o2InputValue">6.0 mg/L</span>
+                            </div>
+                            <input type="range" id="o2Slider" class="form-range" 
+                                   min="0" max="14" step="0.5" value="6.0">
+                            <div class="input-hint">Initial dissolved oxygen</div>
+                        </div>
+                    </div>
+
                     <!-- Control Buttons -->
                     <div class="button-group">
                         <button id="startBtn" class="btn btn-start">▶ Start</button>
@@ -185,22 +265,83 @@
 
                     </div> <!-- End of timeResults -->
 
+                    <!-- Time Check Feature -->
+                    <div class="time-check-section">
+                        <div class="section-divider">
+                            <span class="section-label">Check Quality at Time</span>
+                        </div>
+                        <div class="time-check-inputs">
+                            <div class="time-input-group">
+                                <input type="number" id="checkTimeValue" class="form-input time-input" 
+                                       min="1" max="1440" step="1" value="60" placeholder="Time">
+                                <select id="checkTimeUnit" class="form-select time-unit-select">
+                                    <option value="minutes">Minutes</option>
+                                    <option value="hours">Hours</option>
+                                </select>
+                            </div>
+                            <button id="checkTimeBtn" class="btn btn-check-time">Check Quality</button>
+                        </div>
+                        <div id="timeCheckResults" class="time-check-results" style="display: none;">
+                            <div class="time-check-header">Predicted values at <span id="checkedTimeDisplay">--</span>:</div>
+                            <div class="time-check-values">
+                                <div class="check-value-item">
+                                    <span class="check-label">Turbidity:</span>
+                                    <span class="check-value" id="checkTurbidity">--</span>
+                                </div>
+                                <div class="check-value-item">
+                                    <span class="check-label">Clarity:</span>
+                                    <span class="check-value" id="checkClarity">--</span>
+                                </div>
+                                <div class="check-value-item">
+                                    <span class="check-label">pH:</span>
+                                    <span class="check-value" id="checkPH">--</span>
+                                </div>
+                                <div class="check-value-item">
+                                    <span class="check-label">TSS:</span>
+                                    <span class="check-value" id="checkTSS">--</span>
+                                </div>
+                                <div class="check-value-item">
+                                    <span class="check-label">Conductivity:</span>
+                                    <span class="check-value" id="checkConductivity">--</span>
+                                </div>
+                                <div class="check-value-item">
+                                    <span class="check-label">Dissolved O₂:</span>
+                                    <span class="check-value" id="checkO2">--</span>
+                                </div>
+                            </div>
+                            <div class="progress-indicator">
+                                <span id="checkProgressPercent">--</span> of treatment complete
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Info Box -->
                     <div class="prediction-info">
-                        <p class="info-note"> Realistic water treatment time based on electrocoagulation physics</p>
+                        <p class="info-note">⚗️ First-Order Kinetic Model (Literature-Based)</p>
                         <div class="prediction-factors">
                             <div class="factor-item">
-                                <span class="factor-label">Current Effect:</span>
-                                <span class="factor-value" id="factorCurrent">0.5x</span>
+                                <span class="factor-label">Current Density:</span>
+                                <span class="factor-value" id="factorCurrentDensity">-- A/m²</span>
                             </div>
                             <div class="factor-item">
-                                <span class="factor-label">Volume Factor:</span>
-                                <span class="factor-value" id="factorVolume">1.0x</span>
+                                <span class="factor-label">Target Charge:</span>
+                                <span class="factor-value" id="factorChargeLoading">-- C/L</span>
                             </div>
                             <div class="factor-item">
-                                <span class="factor-label">Anode Type:</span>
-                                <span class="factor-value" id="factorAnode">Aluminum</span>
+                                <span class="factor-label">Al³⁺ Dosage:</span>
+                                <span class="factor-value" id="factorAlDosage">-- mg/L</span>
                             </div>
+                            <div class="factor-item">
+                                <span class="factor-label">pH Efficiency:</span>
+                                <span class="factor-value" id="factorPHEfficiency">--%</span>
+                            </div>
+                            <div class="factor-item">
+                                <span class="factor-label">σ Efficiency:</span>
+                                <span class="factor-value" id="factorConductivityEfficiency">--%</span>
+                            </div>
+                        </div>
+                        <div class="kinetic-formula">
+                            <small>C(t) = C₀ × e<sup>-k×Q</sup> where Q = I×t/V</small>
                         </div>
                     </div>
                 </div>
@@ -250,6 +391,39 @@
                             <div class="ph-marker" id="phMarker" style="left: 50%;"></div>
                             <span class="ph-label ph-label-start">Acidic</span>
                             <span class="ph-label ph-label-end">Alkaline</span>
+                        </div>
+                    </div>
+
+                    <!-- TSS Metric -->
+                    <div class="metric">
+                        <div class="metric-header">
+                            <span class="metric-label">TSS (Total Suspended Solids)</span>
+                            <span class="metric-value" id="tssValue">--</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div id="tssBar" class="progress-fill" style="width: 0%; background: linear-gradient(90deg, #a55eea, #8854d0);"></div>
+                        </div>
+                    </div>
+
+                    <!-- Conductivity Metric -->
+                    <div class="metric">
+                        <div class="metric-header">
+                            <span class="metric-label">Conductivity</span>
+                            <span class="metric-value" id="conductivityValue">--</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div id="conductivityBar" class="progress-fill" style="width: 0%; background: linear-gradient(90deg, #ffd700, #ff9f43);"></div>
+                        </div>
+                    </div>
+
+                    <!-- Dissolved Oxygen Metric -->
+                    <div class="metric">
+                        <div class="metric-header">
+                            <span class="metric-label">Dissolved O₂</span>
+                            <span class="metric-value" id="o2Value">--</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div id="o2Bar" class="progress-fill" style="width: 0%; background: linear-gradient(90deg, #26de81, #20bf6b);"></div>
                         </div>
                     </div>
 
