@@ -819,6 +819,111 @@ h1 {
     border-top: 1px solid rgba(0, 212, 255, 0.2);
 }
 
+.calibration-section {
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid rgba(0, 212, 255, 0.2);
+}
+
+.calibration-help {
+    color: rgba(180, 220, 255, 0.85);
+    font-size: 0.78em;
+    line-height: 1.4;
+    margin-bottom: 10px;
+}
+
+.calibration-textarea {
+    width: 100%;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(0, 212, 255, 0.25);
+    border-radius: 10px;
+    color: var(--text-primary);
+    font-size: 0.84em;
+    font-family: 'Courier New', monospace;
+    padding: 12px;
+    resize: vertical;
+    min-height: 90px;
+    transition: var(--transition);
+}
+
+.calibration-textarea:focus {
+    outline: none;
+    border-color: var(--primary-cyan);
+    box-shadow: 0 0 18px rgba(0, 212, 255, 0.3);
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.calibration-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 10px;
+    flex-wrap: wrap;
+}
+
+.btn-calibrate,
+.btn-calibrate-sample {
+    padding: 10px 14px;
+    border-radius: 10px;
+    font-size: 0.8em;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+}
+
+.btn-calibrate {
+    background: linear-gradient(135deg, #00d4ff, #00a3ff);
+    color: #001b2b;
+    box-shadow: 0 4px 14px rgba(0, 212, 255, 0.35);
+}
+
+.btn-calibrate:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 18px rgba(0, 212, 255, 0.45);
+}
+
+.btn-calibrate-sample {
+    background: linear-gradient(135deg, #2f3d7a, #4658a6);
+    color: #fff;
+    box-shadow: 0 4px 14px rgba(70, 88, 166, 0.35);
+}
+
+.btn-calibrate-sample:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 18px rgba(70, 88, 166, 0.5);
+}
+
+.calibration-status {
+    margin-top: 10px;
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 0.8em;
+    border: 1px solid transparent;
+}
+
+.calibration-info {
+    color: rgba(180, 220, 255, 0.9);
+    background: rgba(0, 212, 255, 0.09);
+    border-color: rgba(0, 212, 255, 0.25);
+}
+
+.calibration-success {
+    color: rgba(0, 255, 136, 0.95);
+    background: rgba(0, 255, 136, 0.09);
+    border-color: rgba(0, 255, 136, 0.25);
+}
+
+.calibration-error {
+    color: rgba(255, 150, 150, 0.95);
+    background: rgba(255, 71, 87, 0.12);
+    border-color: rgba(255, 71, 87, 0.28);
+}
+
+.calibration-results {
+    margin-top: 10px;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+}
+
 .time-check-section .section-divider {
     margin-bottom: 14px;
 }

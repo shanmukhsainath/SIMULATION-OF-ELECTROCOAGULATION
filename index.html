@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Electrocoagulation Water Treatment System</title>
-    <link rel="stylesheet" href="style.css?v=20260102e">
+    <link rel="stylesheet" href="style.css?v=20260320a">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.1/anime.min.js"></script>
 </head>
 <body>
@@ -315,6 +315,33 @@
                         </div>
                     </div>
 
+                    <div class="calibration-section">
+                        <div class="section-divider">
+                            <span class="section-label">Calibration Mode (3-5 Runs)</span>
+                        </div>
+                        <p class="calibration-help">Paste CSV rows as: time_min,current_A,volume_L,area_cm2,turbidity0_NTU,turbidityF_NTU,tss0_mgL,tssF_mgL</p>
+                        <textarea id="calibrationDataInput" class="calibration-textarea" rows="5" placeholder="45,2.0,2.0,50,140,32,220,58&#10;60,1.5,2.0,50,120,35,180,66&#10;40,2.5,1.5,50,160,28,250,54"></textarea>
+                        <div class="calibration-actions">
+                            <button id="calibrateApplyBtn" class="btn btn-calibrate">Fit & Apply</button>
+                            <button id="calibrateSampleBtn" class="btn btn-calibrate-sample">Load Sample</button>
+                        </div>
+                        <div id="calibrationStatus" class="calibration-status calibration-info">No calibration applied yet.</div>
+                        <div class="calibration-results">
+                            <div class="factor-item">
+                                <span class="factor-label">Fitted k (turbidity):</span>
+                                <span class="factor-value" id="fitKTurbidity">-- L/C</span>
+                            </div>
+                            <div class="factor-item">
+                                <span class="factor-label">Fitted k (TSS):</span>
+                                <span class="factor-value" id="fitKTSS">-- L/C</span>
+                            </div>
+                            <div class="factor-item">
+                                <span class="factor-label">Reference Charge:</span>
+                                <span class="factor-value" id="fitReferenceQ">-- C/L</span>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Info Box -->
                     <div class="prediction-info">
                         <p class="info-note">⚗️ First-Order Kinetic Model (Literature-Based)</p>
@@ -458,6 +485,6 @@
         </div>
     </div>
 
-    <script src="app.js?v=20260102e"></script>
+    <script src="app.js?v=20260320a"></script>
 </body>
 </html>

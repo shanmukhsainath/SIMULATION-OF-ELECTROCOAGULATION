@@ -4,6 +4,19 @@
 
 This document provides the scientific basis and research paper references for the formulas and models used in the Electrocoagulation Water Treatment Simulation. The simulation uses heuristic models derived from peer-reviewed electrocoagulation research.
 
+### Implementation Calibration Update (Mar 2026)
+
+The simulation code now uses a more conservative kinetic calibration to avoid under-predicting treatment time for batch EC runs:
+
+- `k_turbidity = 0.0025 L/C`
+- `k_TSS = 0.0018 L/C`
+- `k_COD = 0.0012 L/C`
+- Target removals: turbidity `92%`, TSS `90%`
+- Current-density efficiency is applied with an effective window near `80-300 A/m²`
+- Target charge loading is constrained to a practical batch envelope of `1000-5400 C/L` (approximately `0.3-1.5 Ah/L`)
+
+These values are implemented as conservative engineering estimates for simulation and should still be re-calibrated with your own laboratory data.
+
 ---
 
 ## Table of Contents

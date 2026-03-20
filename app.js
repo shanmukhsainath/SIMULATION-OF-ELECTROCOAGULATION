@@ -39,6 +39,11 @@ const state = {
   currentDensity: 0,        // A/m² (current density)
   aluminumDosage: 0,        // mg/L Al³⁺ released
   targetChargeLoading: 0,   // C/L required for treatment
+  currentTSS: 150,          // mg/L current TSS during simulation
+  calibration: {
+    runCount: 0,
+    lastUpdated: null
+  },
   
   particles: {
     ions: [],
@@ -59,11 +64,12 @@ const KINETIC_CONSTANTS = {
   Al_MOLAR_MASS: 26.98,     // g/mol
   Al_VALENCE: 3,            // electrons transferred
   
-  // First-order rate constants (L/C) - from EC literature
-  // These are typical values from Hakizimana et al. (2017) and Emamjomeh & Sivakumar (2009)
-  k_turbidity: 0.008,       // L/C - turbidity removal rate constant
-  k_TSS: 0.006,             // L/C - TSS removal rate constant
-  k_COD: 0.004,             // L/C - COD removal (if applicable)
+  // First-order rate constants (L/C) - conservative values for Al EC batch systems.
+  // Calibrated with reported treatment windows in reviews (Moussa et al., 2017; Mollah et al., 2001)
+  // and kept intentionally conservative so default runs do not under-predict treatment time.
+  k_turbidity: 0.0025,      // L/C - turbidity removal rate constant
+  k_TSS: 0.0018,            // L/C - TSS removal rate constant
+  k_COD: 0.0012,            // L/C - COD removal (if applicable)
   
   // pH model constants (from Kobya et al. 2003)
   pH_optimal: 7.0,          // Optimal pH for Al coagulation
@@ -77,14 +83,205 @@ const KINETIC_CONSTANTS = {
   conductivity_loss_rate: 0.00005, // fractional loss per C/L
   
   // Treatment thresholds (target removal efficiency)
-  target_turbidity_removal: 0.95,   // 95% removal
-  target_TSS_removal: 0.93,         // 93% removal
+  target_turbidity_removal: 0.92,   // 92% removal
+  target_TSS_removal: 0.90,         // 90% removal
   
-  // Current density range (A/m²) - optimal range from literature
-  j_min: 5,                 // Minimum effective current density
-  j_max: 50,                // Maximum before side reactions dominate
-  j_optimal: 20             // Optimal current density
+  // Current density range (A/m²) - converted from common EC ranges in mA/cm²
+  // 8-30 mA/cm²  ≈ 80-300 A/m²
+  j_min: 80,
+  j_max: 300,
+  j_optimal: 150,
+
+  // Charge loading envelope from batch EC practice (C/L)
+  // 0.3-1.5 Ah/L ≈ 1080-5400 C/L (used as realistic bounds)
+  reference_charge_loading: 1500,
+  min_charge_loading: 1000,
+  max_charge_loading: 5400
 };
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function median(values) {
+  if (!values || values.length === 0) {
+    return 0;
+  }
+
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+
+  if (sorted.length % 2 === 0) {
+    return (sorted[middle - 1] + sorted[middle]) / 2;
+  }
+
+  return sorted[middle];
+}
+
+function parseCalibrationDataset(rawInput) {
+  const lines = rawInput
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('#') && !line.startsWith('//'));
+
+  if (lines.length < 3) {
+    throw new Error('Please provide at least 3 calibration runs.');
+  }
+
+  let startIndex = 0;
+  if (/[a-zA-Z]/.test(lines[0])) {
+    startIndex = 1;
+  }
+
+  const runLines = lines.slice(startIndex);
+  if (runLines.length < 3 || runLines.length > 5) {
+    throw new Error('Calibration mode requires 3 to 5 runs.');
+  }
+
+  const runs = runLines.map((line, index) => {
+    const columns = line.split(/[\t,;]+/).map((entry) => entry.trim());
+
+    if (columns.length !== 6 && columns.length !== 8) {
+      throw new Error(`Row ${index + 1} must have 6 or 8 numeric fields.`);
+    }
+
+    const numbers = columns.map((value) => Number(value));
+    if (numbers.some((value) => !Number.isFinite(value))) {
+      throw new Error(`Row ${index + 1} contains non-numeric values.`);
+    }
+
+    const run = {
+      timeMin: numbers[0],
+      currentA: numbers[1],
+      volumeL: numbers[2],
+      areaCm2: numbers[3],
+      turbidity0: numbers[4],
+      turbidityF: numbers[5],
+      tss0: columns.length === 8 ? numbers[6] : null,
+      tssF: columns.length === 8 ? numbers[7] : null
+    };
+
+    if (run.timeMin <= 0 || run.currentA <= 0 || run.volumeL <= 0 || run.areaCm2 <= 0) {
+      throw new Error(`Row ${index + 1} has invalid operating values.`);
+    }
+
+    if (run.turbidity0 <= 0 || run.turbidityF <= 0 || run.turbidityF >= run.turbidity0) {
+      throw new Error(`Row ${index + 1} turbidity values must be positive and final < initial.`);
+    }
+
+    if (run.tss0 !== null || run.tssF !== null) {
+      if (run.tss0 <= 0 || run.tssF <= 0 || run.tssF >= run.tss0) {
+        throw new Error(`Row ${index + 1} TSS values must be positive and final < initial.`);
+      }
+    }
+
+    return run;
+  });
+
+  return runs;
+}
+
+function fitKineticConstantsFromRuns(runs) {
+  const turbidityK = [];
+  const tssK = [];
+
+  for (const run of runs) {
+    const treatmentSeconds = run.timeMin * 60;
+    const chargeLoading = (run.currentA * treatmentSeconds) / run.volumeL;
+    const kTurb = -Math.log(run.turbidityF / run.turbidity0) / chargeLoading;
+
+    if (Number.isFinite(kTurb) && kTurb > 0) {
+      turbidityK.push(kTurb);
+    }
+
+    if (run.tss0 !== null && run.tssF !== null) {
+      const kTss = -Math.log(run.tssF / run.tss0) / chargeLoading;
+      if (Number.isFinite(kTss) && kTss > 0) {
+        tssK.push(kTss);
+      }
+    }
+  }
+
+  if (turbidityK.length < 3) {
+    throw new Error('Unable to fit turbidity constant from provided runs.');
+  }
+
+  const fittedKTurbidity = clamp(median(turbidityK), 0.0003, 0.02);
+  const fittedKTSS = tssK.length >= 2
+    ? clamp(median(tssK), 0.0003, 0.02)
+    : clamp(fittedKTurbidity * 0.75, 0.0003, 0.02);
+  const fittedKCOD = clamp(fittedKTSS * 0.67, 0.0002, 0.015);
+
+  const qTargets = runs.map(() => {
+    const qTurb = -Math.log(1 - KINETIC_CONSTANTS.target_turbidity_removal) / fittedKTurbidity;
+    const qTss = -Math.log(1 - KINETIC_CONSTANTS.target_TSS_removal) / fittedKTSS;
+    return Math.max(qTurb, qTss);
+  });
+
+  const fittedReferenceQ = clamp(median(qTargets), 800, 6500);
+  const fittedMinQ = clamp(fittedReferenceQ * 0.65, 600, fittedReferenceQ);
+  const fittedMaxQ = clamp(fittedReferenceQ * 2.4, fittedReferenceQ + 200, 9000);
+
+  return {
+    kTurbidity: fittedKTurbidity,
+    kTSS: fittedKTSS,
+    kCOD: fittedKCOD,
+    referenceQ: fittedReferenceQ,
+    minQ: fittedMinQ,
+    maxQ: fittedMaxQ,
+    runCount: runs.length
+  };
+}
+
+function setCalibrationStatus(message, type) {
+  const statusElement = document.getElementById('calibrationStatus');
+  if (!statusElement) {
+    return;
+  }
+
+  statusElement.textContent = message;
+  statusElement.className = `calibration-status calibration-${type}`;
+}
+
+function updateCalibrationResultDisplay(result) {
+  const kTurbElement = document.getElementById('fitKTurbidity');
+  const kTSSElement = document.getElementById('fitKTSS');
+  const qElement = document.getElementById('fitReferenceQ');
+
+  if (kTurbElement) {
+    kTurbElement.textContent = `${result.kTurbidity.toFixed(5)} L/C`;
+  }
+  if (kTSSElement) {
+    kTSSElement.textContent = `${result.kTSS.toFixed(5)} L/C`;
+  }
+  if (qElement) {
+    qElement.textContent = `${Math.round(result.referenceQ)} C/L`;
+  }
+}
+
+function applyCalibrationResult(result) {
+  KINETIC_CONSTANTS.k_turbidity = result.kTurbidity;
+  KINETIC_CONSTANTS.k_TSS = result.kTSS;
+  KINETIC_CONSTANTS.k_COD = result.kCOD;
+  KINETIC_CONSTANTS.reference_charge_loading = result.referenceQ;
+  KINETIC_CONSTANTS.min_charge_loading = result.minQ;
+  KINETIC_CONSTANTS.max_charge_loading = result.maxQ;
+
+  state.calibration.runCount = result.runCount;
+  state.calibration.lastUpdated = new Date().toISOString();
+
+  calculateTreatmentTime();
+  updatePredictionDisplay();
+  updateFactorsDisplay();
+}
+
+function getCalibrationSampleData() {
+  return [
+    '45,2.0,2.0,50,140,32,220,58',
+    '60,1.5,2.0,50,120,35,180,66',
+    '40,2.5,1.5,50,160,28,250,54'
+  ].join('\n');
+}
 
 // Initialize impurities
 function initializeImpurities() {
@@ -129,23 +326,6 @@ function calculateAluminumDosage(timeSeconds) {
   return (massGrams * 1000) / state.waterVolume;
 }
 
-// Calculate required charge loading for target removal (C/L)
-function calculateTargetChargeLoading() {
-  // Using first-order kinetics: C/C₀ = e^(-k×Q)
-  // Solving for Q: Q = -ln(1 - removal) / k
-  
-  // Calculate Q needed for turbidity removal
-  const Q_turbidity = -Math.log(1 - KINETIC_CONSTANTS.target_turbidity_removal) / 
-                      KINETIC_CONSTANTS.k_turbidity;
-  
-  // Calculate Q needed for TSS removal
-  const Q_TSS = -Math.log(1 - KINETIC_CONSTANTS.target_TSS_removal) / 
-                KINETIC_CONSTANTS.k_TSS;
-  
-  // Use the larger value (limiting factor)
-  return Math.max(Q_turbidity, Q_TSS);
-}
-
 // Calculate pollutant concentration at given charge loading
 function calculateConcentrationAtQ(initialConc, rateConstant, chargeLoading) {
   // First-order kinetics: C(Q) = C₀ × e^(-k×Q)
@@ -167,9 +347,43 @@ function calculateConductivityEfficiencyFactor() {
   // Normalized to 500 µS/cm as baseline (efficiency = 1.0)
   // Low conductivity (<200) significantly reduces efficiency
   if (state.conductivity < 200) {
-    return 0.6 + (state.conductivity / 500);
+    return clamp(0.4 + (state.conductivity / 400), 0.4, 0.8);
   }
-  return Math.min(1.2, 0.8 + (state.conductivity / 2500));
+  return clamp(0.8 + (state.conductivity / 2200), 0.8, 1.2);
+}
+
+function calculateCurrentDensityEfficiencyFactor(currentDensity) {
+  if (currentDensity < KINETIC_CONSTANTS.j_min) {
+    return clamp(currentDensity / KINETIC_CONSTANTS.j_min, 0.35, 1.0);
+  }
+
+  if (currentDensity > KINETIC_CONSTANTS.j_max) {
+    return clamp(KINETIC_CONSTANTS.j_max / currentDensity, 0.35, 1.0);
+  }
+
+  const deviation = Math.abs(currentDensity - KINETIC_CONSTANTS.j_optimal) / KINETIC_CONSTANTS.j_optimal;
+  return clamp(1 - (deviation * 0.25), 0.75, 1.0);
+}
+
+function getEffectiveRateConstants(currentDensity) {
+  const phEfficiency = calculatePHEfficiencyFactor();
+  const conductivityEfficiency = calculateConductivityEfficiencyFactor();
+  const currentDensityEfficiency = calculateCurrentDensityEfficiencyFactor(currentDensity);
+
+  const combinedEfficiency = clamp(
+    phEfficiency * conductivityEfficiency * currentDensityEfficiency,
+    0.2,
+    1.25
+  );
+
+  return {
+    k_turbidity: KINETIC_CONSTANTS.k_turbidity * combinedEfficiency,
+    k_TSS: KINETIC_CONSTANTS.k_TSS * combinedEfficiency,
+    k_COD: KINETIC_CONSTANTS.k_COD * combinedEfficiency,
+    phEfficiency,
+    conductivityEfficiency,
+    currentDensityEfficiency
+  };
 }
 
 function calculateTreatmentTime() {
@@ -181,20 +395,10 @@ function calculateTreatmentTime() {
   const currentDensity = calculateCurrentDensity();
   
   // Step 2: Calculate target charge loading for treatment completion
-  const baseTargetQ = calculateTargetChargeLoading();
-  
-  // Step 3: Apply efficiency factors based on water quality
-  const phEfficiency = calculatePHEfficiencyFactor();
-  const conductivityEfficiency = calculateConductivityEfficiencyFactor();
-  
-  // Adjust rate constants based on initial pollutant load
-  // Higher initial turbidity requires more Al dosage per unit removal
-  const turbidityLoadFactor = 1 + Math.log10(state.initialTurbidity / 50);
-  const tssLoadFactor = 1 + Math.log10(state.initialTSS / 100);
-  const loadFactor = Math.max(turbidityLoadFactor, tssLoadFactor);
-  
-  // Effective target charge loading
-  state.targetChargeLoading = baseTargetQ * loadFactor / (phEfficiency * conductivityEfficiency);
+  state.targetChargeLoading = calculateTargetChargeLoading();
+
+  // Step 3: Calculate effective rates and efficiencies at current operating point
+  const effectiveRates = getEffectiveRateConstants(currentDensity);
   
   // Step 4: Calculate treatment time from charge loading
   // Q = I × t / V => t = Q × V / I
@@ -211,12 +415,12 @@ function calculateTreatmentTime() {
   state.treatmentTimeFactors = {
     currentDensity: currentDensity.toFixed(1) + ' A/m²',
     targetChargeLoading: state.targetChargeLoading.toFixed(1) + ' C/L',
-    phEfficiency: (phEfficiency * 100).toFixed(0) + '%',
-    conductivityEfficiency: (conductivityEfficiency * 100).toFixed(0) + '%',
+    phEfficiency: (effectiveRates.phEfficiency * 100).toFixed(0) + '%',
+    conductivityEfficiency: ((effectiveRates.conductivityEfficiency * effectiveRates.currentDensityEfficiency) * 100).toFixed(0) + '%',
     aluminumDosage: state.aluminumDosage.toFixed(1) + ' mg/L'
   };
   
-  state.estimatedTreatmentTime = Math.max(300, treatmentTimeSeconds); // Minimum 5 minutes
+  state.estimatedTreatmentTime = treatmentTimeSeconds;
   state.elapsedTreatmentTime = 0;
   state.isTreated = false;
   
@@ -224,9 +428,67 @@ function calculateTreatmentTime() {
   state.turbidity = Math.min(95, state.initialTurbidity / 5); // Scale NTU to % for visualization
   state.phLevel = state.initialPH;
   state.clarity = 100 - state.turbidity;
+  state.currentTSS = state.initialTSS;
   
   updatePredictionDisplay();
   updateFactorsDisplay();
+}
+
+function calculateTargetChargeLoading() {
+  const currentDensity = calculateCurrentDensity();
+  const effectiveRates = getEffectiveRateConstants(currentDensity);
+
+  const Q_turbidity = -Math.log(1 - KINETIC_CONSTANTS.target_turbidity_removal) / effectiveRates.k_turbidity;
+  const Q_TSS = -Math.log(1 - KINETIC_CONSTANTS.target_TSS_removal) / effectiveRates.k_TSS;
+  const kineticTargetQ = Math.max(Q_turbidity, Q_TSS);
+
+  // Empirical batch EC floor derived from common operational windows in literature reviews.
+  const turbidityLoad = state.initialTurbidity / 100;
+  const tssLoad = state.initialTSS / 150;
+  const combinedLoad = clamp((0.6 * turbidityLoad) + (0.4 * tssLoad), 0.5, 2.5);
+  const empiricalTargetQ = KINETIC_CONSTANTS.reference_charge_loading * combinedLoad;
+
+  return clamp(
+    Math.max(kineticTargetQ, empiricalTargetQ),
+    KINETIC_CONSTANTS.min_charge_loading,
+    KINETIC_CONSTANTS.max_charge_loading
+  );
+}
+
+function predictWaterQualityAtTime(timeSeconds) {
+  const currentDensity = calculateCurrentDensity();
+  const effectiveRates = getEffectiveRateConstants(currentDensity);
+  const Q = calculateChargeLoading(timeSeconds);
+
+  const turbidityNTU = calculateConcentrationAtQ(state.initialTurbidity, effectiveRates.k_turbidity, Q);
+  const predictedTurbidity = Math.max(5, Math.min(95, turbidityNTU / 5));
+
+  const predictedTSS = Math.max(10, calculateConcentrationAtQ(state.initialTSS, effectiveRates.k_TSS, Q));
+  const predictedClarity = Math.min(95, 100 - predictedTurbidity);
+
+  const phShift = KINETIC_CONSTANTS.pH_shift_rate * Q;
+  let predictedPH = state.initialPH;
+  if (state.initialPH > KINETIC_CONSTANTS.pH_optimal) {
+    predictedPH = Math.max(KINETIC_CONSTANTS.pH_optimal, state.initialPH - phShift);
+  } else {
+    predictedPH = Math.min(KINETIC_CONSTANTS.pH_optimal, state.initialPH + phShift);
+  }
+
+  const conductivityLoss = state.conductivity * KINETIC_CONSTANTS.conductivity_loss_rate * Q;
+  const predictedConductivity = Math.max(state.conductivity * 0.65, state.conductivity - conductivityLoss);
+
+  const o2Increase = KINETIC_CONSTANTS.O2_increase_rate * Q;
+  const predictedO2 = Math.min(KINETIC_CONSTANTS.O2_saturation, state.initialO2 + o2Increase);
+
+  return {
+    Q,
+    predictedTurbidity,
+    predictedClarity,
+    predictedPH,
+    predictedTSS,
+    predictedConductivity,
+    predictedO2
+  };
 }
 
 function updatePredictionDisplay() {
@@ -529,38 +791,12 @@ function updateWaterQuality() {
   // ========================================
   // KINETIC MODEL: Calculate current charge loading
   // ========================================
-  const Q = calculateChargeLoading(state.elapsedTreatmentTime);
-  state.chargeLoading = Q;
-  
-  // ========================================
-  // FIRST-ORDER KINETICS: C(Q) = C₀ × e^(-k×Q)
-  // ========================================
-  
-  // Turbidity removal
-  const turbidityNTU = calculateConcentrationAtQ(
-    state.initialTurbidity, 
-    KINETIC_CONSTANTS.k_turbidity, 
-    Q
-  );
-  state.turbidity = Math.max(5, Math.min(95, turbidityNTU / 5));
-  
-  // Clarity is inverse of turbidity
-  state.clarity = Math.min(95, 100 - state.turbidity);
-  
-  // TSS removal
-  const currentTSS = calculateConcentrationAtQ(
-    state.initialTSS, 
-    KINETIC_CONSTANTS.k_TSS, 
-    Q
-  );
-  
-  // pH model: shifts towards optimal based on Al(OH)3 formation
-  const phShift = KINETIC_CONSTANTS.pH_shift_rate * Q;
-  if (state.initialPH > KINETIC_CONSTANTS.pH_optimal) {
-    state.phLevel = Math.max(KINETIC_CONSTANTS.pH_optimal, state.initialPH - phShift);
-  } else {
-    state.phLevel = Math.min(KINETIC_CONSTANTS.pH_optimal, state.initialPH + phShift);
-  }
+  const prediction = predictWaterQualityAtTime(state.elapsedTreatmentTime);
+  state.chargeLoading = prediction.Q;
+  state.turbidity = prediction.predictedTurbidity;
+  state.clarity = prediction.predictedClarity;
+  state.phLevel = prediction.predictedPH;
+  state.currentTSS = prediction.predictedTSS;
 
   // Anode dissolves using Faraday's Law
   // Calculate mass loss in grams
@@ -653,7 +889,8 @@ function setupEventListeners() {
     // ========================================
     
     // Calculate charge loading at the given time (C/L)
-    const Q = calculateChargeLoading(checkTimeSeconds);
+    const prediction = predictWaterQualityAtTime(checkTimeSeconds);
+    const Q = prediction.Q;
     
     // Calculate progress percentage based on charge loading
     const progressPercent = Math.min(100, (Q / state.targetChargeLoading) * 100);
@@ -661,46 +898,12 @@ function setupEventListeners() {
     // Calculate aluminum dosage at this time (mg/L)
     const alDosage = calculateAluminumDosage(checkTimeSeconds);
     
-    // ========================================
-    // FIRST-ORDER KINETICS: C(Q) = C₀ × e^(-k×Q)
-    // ========================================
-    
-    // Turbidity removal (first-order kinetics)
-    const turbidityNTU = calculateConcentrationAtQ(
-      state.initialTurbidity, 
-      KINETIC_CONSTANTS.k_turbidity, 
-      Q
-    );
-    // Convert NTU to % for display (scaled)
-    const predictedTurbidity = Math.max(5, Math.min(95, turbidityNTU / 5));
-    
-    // TSS removal (first-order kinetics)
-    const predictedTSS = Math.max(10, calculateConcentrationAtQ(
-      state.initialTSS, 
-      KINETIC_CONSTANTS.k_TSS, 
-      Q
-    ));
-    
-    // Clarity is inverse of turbidity
-    const predictedClarity = Math.min(95, 100 - predictedTurbidity);
-    
-    // pH model: shifts towards optimal based on Al(OH)3 formation
-    // pH shift depends on initial pH and charge loading
-    const phShift = KINETIC_CONSTANTS.pH_shift_rate * Q;
-    let predictedPH = state.initialPH;
-    if (state.initialPH > KINETIC_CONSTANTS.pH_optimal) {
-      predictedPH = Math.max(KINETIC_CONSTANTS.pH_optimal, state.initialPH - phShift);
-    } else {
-      predictedPH = Math.min(KINETIC_CONSTANTS.pH_optimal, state.initialPH + phShift);
-    }
-    
-    // Conductivity decreases due to ion consumption
-    const conductivityLoss = state.conductivity * KINETIC_CONSTANTS.conductivity_loss_rate * Q;
-    const predictedConductivity = Math.max(state.conductivity * 0.7, state.conductivity - conductivityLoss);
-    
-    // Dissolved O2 increases due to H2 bubble aeration
-    const o2Increase = KINETIC_CONSTANTS.O2_increase_rate * Q;
-    const predictedO2 = Math.min(KINETIC_CONSTANTS.O2_saturation, state.initialO2 + o2Increase);
+    const predictedTurbidity = prediction.predictedTurbidity;
+    const predictedTSS = prediction.predictedTSS;
+    const predictedClarity = prediction.predictedClarity;
+    const predictedPH = prediction.predictedPH;
+    const predictedConductivity = prediction.predictedConductivity;
+    const predictedO2 = prediction.predictedO2;
     
     // Display results
     const timeDisplay = timeUnit === 'hours' 
@@ -718,6 +921,34 @@ function setupEventListeners() {
     
     document.getElementById('timeCheckResults').style.display = 'block';
   });
+
+  const calibrateApplyBtn = document.getElementById('calibrateApplyBtn');
+  if (calibrateApplyBtn) {
+    calibrateApplyBtn.addEventListener('click', () => {
+      try {
+        const calibrationInput = document.getElementById('calibrationDataInput');
+        const inputText = calibrationInput ? calibrationInput.value : '';
+        const runs = parseCalibrationDataset(inputText);
+        const fittedResult = fitKineticConstantsFromRuns(runs);
+        applyCalibrationResult(fittedResult);
+        updateCalibrationResultDisplay(fittedResult);
+        setCalibrationStatus(`Calibration applied from ${fittedResult.runCount} runs.`, 'success');
+      } catch (error) {
+        setCalibrationStatus(error.message, 'error');
+      }
+    });
+  }
+
+  const calibrateSampleBtn = document.getElementById('calibrateSampleBtn');
+  if (calibrateSampleBtn) {
+    calibrateSampleBtn.addEventListener('click', () => {
+      const calibrationInput = document.getElementById('calibrationDataInput');
+      if (calibrationInput) {
+        calibrationInput.value = getCalibrationSampleData();
+      }
+      setCalibrationStatus('Sample calibration runs loaded. Click Fit & Apply.', 'info');
+    });
+  }
 
   document.getElementById('speedSlider').addEventListener('input', (e) => {
     state.speed = parseFloat(e.target.value);
@@ -851,12 +1082,13 @@ function showPredictedTime() {
 
 // Show predicted final water quality with animation
 function showPredictedResults() {
-  const predictedTurbidity = 5;
-  const predictedClarity = 95;
-  const predictedPH = 6.8;
-  const predictedTSS = 10; // Target TSS after treatment (mg/L)
-  const predictedConductivity = state.conductivity * 0.85; // Slight reduction after treatment
-  const predictedO2 = Math.min(12, state.initialO2 * 1.4); // O2 increases due to aeration
+  const predicted = predictWaterQualityAtTime(state.estimatedTreatmentTime);
+  const predictedTurbidity = predicted.predictedTurbidity;
+  const predictedClarity = predicted.predictedClarity;
+  const predictedPH = predicted.predictedPH;
+  const predictedTSS = predicted.predictedTSS;
+  const predictedConductivity = predicted.predictedConductivity;
+  const predictedO2 = predicted.predictedO2;
   
   // Animate turbidity
   animateValue('turbidityValue', 0, predictedTurbidity, '%', 800);
@@ -1237,6 +1469,7 @@ function init() {
   updateBeakerVisualization();
   updatePredictionDisplay();
   updateFactorsDisplay();
+  setCalibrationStatus('No calibration applied yet.', 'info');
   updateAnodeInfo();
   drawParticlesSVG(); // Draw initial impurities
   setupEventListeners();

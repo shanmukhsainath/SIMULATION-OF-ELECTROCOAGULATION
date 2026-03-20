@@ -21,7 +21,8 @@ This interactive simulation demonstrates the electrocoagulation process for wate
   - **Impurities** being removed from water
 
 ### Treatment Time Prediction
-- Heuristic model based on electrocoagulation physics
+- Literature-calibrated kinetic model (charge loading + first-order removal)
+- Built-in calibration mode to fit kinetic constants from your own experiments
 - Factors considered:
   - Current intensity (1.0 - 5.0 A)
   - Water volume (0.5 - 5.0 L)
@@ -96,6 +97,12 @@ ELECTROLYSIS SIMULATION/
    - **Pause**: Pause the simulation
    - **Reset**: Reset to initial state
 
+5. **Calibration Mode** (Right Panel → Treatment Time Prediction):
+   - Paste **3-5 CSV runs** in this format:
+     - `time_min,current_A,volume_L,area_cm2,turbidity0_NTU,turbidityF_NTU,tss0_mgL,tssF_mgL`
+   - Click **Fit & Apply** to update kinetic constants (`k_turbidity`, `k_TSS`) and reference charge loading.
+   - Use **Load Sample** to prefill example runs and test the workflow.
+
 ##  Electrochemistry
 
 ### At Anode (Aluminum - Oxidation)
@@ -125,62 +132,40 @@ Aluminum ions combine with hydroxide ions to form aluminum hydroxide flocs that 
 
 ##  Treatment Time Model
 
-The simulation uses a heuristic model with the following base assumptions:
-- **Base treatment time**: 8 hours for 2L at 2A
-- **Current factor**: Inverse relationship (higher current = faster treatment)
-- **Volume factor**: Linear relationship (more volume = longer treatment)
-- **Turbidity factor**: Higher contamination requires more time
-- **pH factor**: Deviation from neutral pH increases treatment time
+The simulation uses a **charge-loading kinetic model** grounded in electrocoagulation literature:
 
-##  How Predictions Work (Heuristic Model)
+1. Compute charge loading:
+   - $Q = \frac{I \cdot t}{V}$ (C/L)
+2. Apply first-order pollutant kinetics:
+   - $C(Q) = C_0 e^{-kQ}$
+3. Solve required charge for target removal:
+   - $Q_{target} = -\ln(1-R)/k$
+4. Convert to time:
+   - $t = \frac{Q_{target} \cdot V}{I}$
 
-> **Important**: This simulation uses a **mathematical heuristic model**, NOT real sensor data or machine learning.
+### Model calibration used
 
-### Treatment Time Calculation
+- Conservative kinetic constants are used for turbidity/TSS so time is not under-predicted.
+- Current-density efficiency is included with an operating window near **80-300 A/m²** (converted from typical EC ranges in mA/cm²).
+- A practical batch-EC charge-loading envelope is enforced (**1000-5400 C/L**, equivalent to roughly **0.3-1.5 Ah/L**) so extremely short predictions are avoided.
 
-The time is calculated using a formula based on known electrocoagulation principles:
+### Water quality predictions
 
-```javascript
-// Base time: 8 hours (typical for electrocoagulation at standard conditions)
-const baseTime = 8 * 3600; // 8 hours in seconds
+Water quality outputs are now computed dynamically from the same kinetic equations at the selected check time and at estimated completion time:
 
-// Factor 1: Current (higher current = faster treatment)
-const currentFactor = 2.0 / state.current;  // Inverse relationship
+- Turbidity and TSS from first-order decay vs. charge loading
+- Clarity from turbidity
+- pH movement toward neutral due to hydroxide/floc chemistry
+- Conductivity and dissolved oxygen trends from charge loading
 
-// Factor 2: Volume (more water = longer time)
-const volumeFactor = state.waterVolume / 2.0;  // Linear relationship
+### Scientific basis
 
-// Factor 3: Turbidity (dirtier water = longer time)
-const turbidityFactor = (state.turbidity / 95) * 0.8 + 0.2;
-
-// Factor 4: pH deviation from neutral (affects efficiency)
-const phFactor = 1.0 + (Math.abs(state.phLevel - 7.0) * 0.08);
-
-// Final calculation
-estimatedTime = baseTime × currentFactor × volumeFactor × turbidityFactor × phFactor
-```
-
-The **8-hour base time** comes from research showing typical electrocoagulation treatments take 4-24 hours depending on conditions.
-
-### Water Quality Predictions
-
-The water quality values are **fixed target values** representing typical electrocoagulation efficiency:
-
-| Parameter | Predicted Value | Scientific Basis |
-|-----------|----------------|------------------|
-| Turbidity | **5%** | EC typically achieves 90-95% turbidity removal |
-| Clarity | **95%** | Inverse of turbidity |
-| pH | **6.8** | EC tends to neutralize pH toward 6.5-7.5 range |
-
-These are the **expected outcomes** based on published electrocoagulation research, not real-time calculations.
-
-### Scientific Basis
-
-The model is inspired by:
-1. **Faraday's Law of Electrolysis** - relates current to ion release rate
-2. **Coagulation kinetics** - higher current = faster coagulant formation
-3. **Mass balance** - larger volumes need proportionally more treatment
-4. **pH effects** - optimal coagulation occurs near neutral pH
+The implementation is based on standard EC formulations and review guidance from:
+- Mollah et al. (2001)
+- Chen (2004)
+- Kobya et al. (2003)
+- Bayramoglu et al. (2004)
+- Moussa et al. (2017)
 
 ### What a Real System Would Need
 
